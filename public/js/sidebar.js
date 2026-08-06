@@ -9,6 +9,14 @@ const THEME_KEY = "qai_theme";
 
 let appContainer, sidebarToggle, sidebarToggleMain, sidebarOverlay;
 let chatHistoryList, newChatButton, newChatButtonMain;
+let openHistoryMenu = null;
+
+const closeHistoryMenu = () => {
+  if (!openHistoryMenu) return;
+  openHistoryMenu.menu.classList.remove("open");
+  openHistoryMenu.button.setAttribute("aria-expanded", "false");
+  openHistoryMenu = null;
+};
 
 export const closeSidebarOnMobile = () => {
   if (window.innerWidth <= 768 && appContainer) {
@@ -152,16 +160,14 @@ export const renderHistoryList = () => {
     const historyIcon = document.createElement("span");
     historyIcon.className = "history-icon";
     historyIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>';
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "history-action-btn edit-history-btn";
-    editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-    editBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
+    const startRename = () => {
       const input = document.createElement("input");
       input.className = "history-title-input";
       input.value = chat.title || "New Chat";
+      let saved = false;
       const save = () => {
+        if (saved) return;
+        saved = true;
         const newTitle = input.value.trim() || "New Chat";
         chat.title = newTitle;
         chat.titleIsCustom = true;
@@ -178,30 +184,71 @@ export const renderHistoryList = () => {
       };
       input.addEventListener("keydown", (e2) => {
         if (e2.key === "Enter") save();
-        if (e2.key === "Escape") renderHistoryList();
+        if (e2.key === "Escape") {
+          saved = true;
+          renderHistoryList();
+        }
       });
       input.addEventListener("blur", save);
       titleContainer.replaceChild(input, title);
       input.focus();
       input.select();
-      editBtn.style.display = "none";
+    };
+
+    const menuButton = document.createElement("button");
+    menuButton.type = "button";
+    menuButton.className = "history-menu-btn";
+    menuButton.setAttribute("aria-label", `Manage ${chat.title || "chat"}`);
+    menuButton.setAttribute("aria-haspopup", "menu");
+    menuButton.setAttribute("aria-expanded", "false");
+    menuButton.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>';
+
+    const menu = document.createElement("div");
+    menu.className = "history-menu";
+    menu.setAttribute("role", "menu");
+
+    const addMenuAction = (label, icon, handler, danger = false) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `history-menu-item${danger ? " danger" : ""}`;
+      button.setAttribute("role", "menuitem");
+      button.innerHTML = `${icon}<span>${label}</span>`;
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeHistoryMenu();
+        handler();
+      });
+      menu.appendChild(button);
+    };
+
+    addMenuAction("Rename", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4z"/></svg>', startRename);
+    addMenuAction("Share", '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4"/></svg>', () => {
+      document.querySelector("share-modal")?.open(chat.id);
     });
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "history-action-btn delete-history-btn";
-    deleteBtn.textContent = "\u2715";
-    deleteBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      showModal("Delete Chat", "Delete this chat history? This cannot be undone.", () => {
+    addMenuAction("Delete", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2M19 6l-1 15H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>', () => {
+      showModal("Delete Chat", `Delete “${chat.title || "New Chat"}”? This cannot be undone.`, () => {
         deleteHistory(chat.id);
         renderHistoryList();
       });
+    }, true);
+
+    menuButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const wasOpen = openHistoryMenu?.menu === menu;
+      closeHistoryMenu();
+      if (!wasOpen) {
+        menu.classList.add("open");
+        menuButton.setAttribute("aria-expanded", "true");
+        openHistoryMenu = { menu, button: menuButton };
+      }
     });
-    titleContainer.append(historyIcon, title, editBtn);
+
+    titleContainer.append(historyIcon, title);
     item.addEventListener("click", () => {
+      closeHistoryMenu();
       window.dispatchEvent(new CustomEvent("qai:loadChat", { detail: { id: chat.id } }));
     });
-    item.append(titleContainer, deleteBtn);
+    item.append(titleContainer, menuButton, menu);
     chatHistoryList.appendChild(item);
   });
 };
@@ -219,6 +266,10 @@ export const initSidebar = () => {
   if (sidebarToggle) sidebarToggle.addEventListener("click", toggleSidebar);
   if (sidebarToggleMain) sidebarToggleMain.addEventListener("click", toggleSidebar);
   if (sidebarOverlay) sidebarOverlay.addEventListener("click", closeSidebarOnMobile);
+  document.addEventListener("click", closeHistoryMenu);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeHistoryMenu();
+  });
 
   loadSidebarState();
   loadTheme();
