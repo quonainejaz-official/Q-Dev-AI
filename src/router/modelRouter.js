@@ -14,6 +14,7 @@ const { detectReasoning, getReasoningModel } = require("../utils/reasoningDetect
 
 // Provider cost tiers (lower = cheaper). Adjust as pricing changes.
 const COST_TIERS = {
+  zenmux: 1,     // free Atria Dawn via Zenmux
   opencode: 1,   // free/cheap
   gemini: 2,     // free tier available
   openai: 3,     // moderate

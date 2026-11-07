@@ -1,7 +1,7 @@
 {
-  "name": "hf-chatbot",
+  "name": "q-dev-ai",
   "version": "1.0.0",
-  "description": "Full-stack Hugging Face chatbot with Express and EJS",
+  "description": "Full-stack AI chatbot with Express and EJS",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

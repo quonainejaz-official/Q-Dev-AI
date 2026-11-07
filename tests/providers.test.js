@@ -2,6 +2,7 @@ const { OpenAIProvider } = require("../src/providers/openai");
 const { AnthropicProvider } = require("../src/providers/anthropic");
 const { GeminiProvider } = require("../src/providers/gemini");
 const { OpenCodeProvider } = require("../src/providers/opencode");
+const { ZenmuxProvider } = require("../src/providers/zenmux");
 const { BaseProvider } = require("../src/providers/base");
 
 describe("OpenAIProvider", () => {
@@ -84,6 +85,26 @@ describe("GeminiProvider", () => {
   test("canHandle returns false for unsupported capabilities", () => {
     expect(provider.canHandle({ tools: true })).toBe(false);
     expect(provider.canHandle({ audio: true })).toBe(false);
+  });
+});
+
+describe("ZenmuxProvider", () => {
+  test("defaults to atria-asi/atria-dawn", () => {
+    const provider = new ZenmuxProvider({ apiKey: "test-key" });
+    expect(provider.model).toBe("atria-asi/atria-dawn");
+    expect(provider.capabilities.models).toContain("atria-asi/atria-dawn");
+    expect(provider.capabilities.streaming).toBe(true);
+    expect(provider.capabilities.vision).toBe(false);
+  });
+
+  test("builds text chat messages", () => {
+    const provider = new ZenmuxProvider({ apiKey: "test-key" });
+    const messages = provider._buildMessages([{ role: "user", content: "Hi" }], "Hello");
+    expect(messages[0].role).toBe("system");
+    expect(messages[messages.length - 1]).toEqual({
+      role: "user",
+      content: "Hello",
+    });
   });
 });
 

@@ -78,7 +78,8 @@ const getReasoningModel = (provider) => {
     openai: "gpt-4o",
     anthropic: "claude-sonnet-4-20250514",
     gemini: "gemini-2.0-flash",
-    opencode: "big-pickle"
+    opencode: "big-pickle",
+    zenmux: "atria-asi/atria-dawn"
   };
 
   const preferred = reasoningModels[name];

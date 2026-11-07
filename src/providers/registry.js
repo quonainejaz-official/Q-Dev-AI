@@ -1,3 +1,4 @@
+const { ZenmuxProvider } = require("./zenmux");
 const { OpenCodeProvider } = require("./opencode");
 const { OpenAIProvider } = require("./openai");
 const { AnthropicProvider } = require("./anthropic");
@@ -68,7 +69,10 @@ const registry = new ProviderRegistry();
 
 const initProviders = () => {
   // Register providers based on available API keys.
-  // Order defines fallback priority: OpenCode → OpenAI → Anthropic → Gemini.
+  // Order defines fallback priority: Zenmux → OpenCode → Hugging Face → OpenAI → Anthropic → Gemini.
+  if (process.env.ZENMUX_API_KEY) {
+    registry.register(new ZenmuxProvider());
+  }
   if (process.env.OPENCODE_API_KEY) {
     registry.register(new OpenCodeProvider());
   }
@@ -86,7 +90,7 @@ const initProviders = () => {
   }
 
   if (registry.list().length === 0) {
-    console.warn("[providers] No AI providers configured. Set at least one: OPENCODE_API_KEY, HF_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY.");
+    console.warn("[providers] No AI providers configured. Set at least one: ZENMUX_API_KEY, OPENCODE_API_KEY, HF_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY.");
   } else {
     const names = registry.list().map((p) => p.name);
     console.log(`[providers] Registered: ${names.join(", ")}`);

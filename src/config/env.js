@@ -27,6 +27,9 @@ const validateEnv = () => {
     MAX_MESSAGE_LENGTH: "Max characters per message.",
     MAX_HISTORY_LENGTH: "Max messages in context.",
     DNS_SERVERS: "Comma-separated DNS servers for MongoDB SRV.",
+    ZENMUX_API_KEY: "API key for Zenmux (Atria Dawn chat).",
+    ZENMUX_MODEL: "Zenmux chat model (default: atria-asi/atria-dawn).",
+    ZENMUX_API_URL: "Zenmux OpenAI-compatible chat completions URL.",
     HF_API_KEY: "API key for Hugging Face Inference Providers.",
     HF_TOKEN: "API token for Hugging Face Inference Providers.",
     HF_MODEL: "Hugging Face chat model (default: openai/gpt-oss-20b:fastest).",
@@ -91,7 +94,7 @@ const validateEnv = () => {
   }
 
   // At least one AI provider API key must be set.
-  const providerKeys = ["OPENCODE_API_KEY", "HF_API_KEY", "HF_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"];
+  const providerKeys = ["ZENMUX_API_KEY", "OPENCODE_API_KEY", "HF_API_KEY", "HF_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"];
   const hasProvider = providerKeys.some((k) => process.env[k]);
   if (!hasProvider) {
     const msg = "No AI provider API key set. Set at least one: " + providerKeys.join(", ");
