@@ -175,6 +175,7 @@ export class ShareModal extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this.shadowRoot.appendChild(TEMPLATE.content.cloneNode(true));
     this._shareUrl = '';
+    this._activeType = 'link';
   }
 
   connectedCallback() {
@@ -185,9 +186,17 @@ export class ShareModal extends HTMLElement {
       if (e.key === 'Escape' && this.classList.contains('open')) this.close();
     });
 
+    const input = this.shadowRoot.querySelector('.link-input');
+    if (input) {
+      input.addEventListener('click', () => {
+        if (input.value) input.select();
+      });
+    }
+
     this.shadowRoot.querySelector('.copy-btn').addEventListener('click', () => {
-      if (this._shareUrl) {
-        copyToClipboard(this._shareUrl);
+      const textToCopy = input?.value || this._shareUrl;
+      if (textToCopy) {
+        copyToClipboard(textToCopy);
         const btn = this.shadowRoot.querySelector('.copy-btn');
         btn.textContent = 'Copied!';
         btn.classList.add('copied');
@@ -202,12 +211,40 @@ export class ShareModal extends HTMLElement {
       opt.addEventListener('click', () => {
         this.shadowRoot.querySelectorAll('.share-option').forEach((o) => o.classList.remove('active'));
         opt.classList.add('active');
+        this._activeType = opt.dataset.share || 'link';
+        this._updateContent();
       });
     });
   }
 
+  _updateContent() {
+    const input = this.shadowRoot.querySelector('.link-input');
+    const label = this.shadowRoot.querySelector('.link-label');
+    if (!input || !label) return;
+
+    if (this._activeType === 'embed') {
+      label.textContent = 'Embed Code';
+      if (this._shareUrl) {
+        input.value = `<iframe src="${this._shareUrl}" width="100%" height="600" frameborder="0"></iframe>`;
+      } else {
+        input.value = '';
+        input.placeholder = 'Generating embed code...';
+      }
+    } else {
+      label.textContent = 'Shareable Link';
+      if (this._shareUrl) {
+        input.value = this._shareUrl;
+      } else {
+        input.value = '';
+        input.placeholder = 'Generating link...';
+      }
+    }
+  }
+
   async open(conversationId) {
     this.classList.add('open');
+    this._activeType = 'link';
+    this._shareUrl = '';
     const input = this.shadowRoot.querySelector('.link-input');
     const btn = this.shadowRoot.querySelector('.copy-btn');
     input.value = '';
@@ -215,6 +252,11 @@ export class ShareModal extends HTMLElement {
     btn.textContent = 'Copy';
     btn.disabled = true;
     btn.classList.remove('copied');
+
+    this.shadowRoot.querySelectorAll('.share-option').forEach((o) => {
+      o.classList.toggle('active', o.dataset.share === 'link');
+    });
+    this._updateContent();
 
     try {
       const cacheKey = `qai_share_${conversationId}`;
@@ -224,7 +266,7 @@ export class ShareModal extends HTMLElement {
         if (statusRes.ok) {
           const status = await statusRes.json();
           this._shareUrl = cached.shareUrl;
-          input.value = cached.shareUrl;
+          this._updateContent();
           btn.disabled = false;
           this.shadowRoot.querySelector('.views').textContent = status.views || 0;
           return;
@@ -270,7 +312,7 @@ export class ShareModal extends HTMLElement {
       }
 
       this._shareUrl = result.shareUrl || `${window.location.origin}/shared/${result.shareId}`;
-      input.value = this._shareUrl;
+      this._updateContent();
       btn.disabled = false;
       this.shadowRoot.querySelector('.views').textContent = result.views || 0;
       localStorage.setItem(cacheKey, JSON.stringify({ shareId: result.shareId, shareUrl: this._shareUrl }));
@@ -285,6 +327,7 @@ export class ShareModal extends HTMLElement {
   close() {
     this.classList.remove('open');
     this._shareUrl = '';
+    this._activeType = 'link';
   }
 }
 
