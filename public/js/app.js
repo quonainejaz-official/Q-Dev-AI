@@ -22,6 +22,15 @@ import { StorageService } from "./services/StorageService.js";
 const MESSAGE_LIMITS = { maxLines: 5000, maxChars: 50000, maxWords: 50000, maxTextareaHeightPx: 200 };
 let lastLimitToastAt = 0;
 let lastLimitToastKey = "";
+let activeAbortController = null;
+
+window.addEventListener("qai:stopGeneration", () => {
+  if (activeAbortController) {
+    activeAbortController.abort();
+    activeAbortController = null;
+    window.dispatchEvent(new CustomEvent("qai:streamAborted"));
+  }
+});
 
 const countLines = (text) => text ? text.split(/\r\n|\r|\n/).length : 0;
 const countWords = (text) => {
@@ -144,13 +153,15 @@ const submitMessage = async () => {
   // Trigger preview re-render (imported from media module)
   window.dispatchEvent(new CustomEvent("qai:clearPreviews"));
 
-  setTyping(true);
+  setTyping(true, message);
+  activeAbortController = new AbortController();
   try {
     const response = await fetch("/api/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      credentials: "include"
+      credentials: "include",
+      signal: activeAbortController.signal
     });
     if (!response.ok) {
       setTyping(false);
@@ -168,10 +179,16 @@ const submitMessage = async () => {
     const decoder = new TextDecoder();
     const stream = startStreamEvent(reader, decoder);
     await stream.readNext();
-  } catch {
+  } catch (err) {
     setTyping(false);
-    addMessageToCurrent("bot", "Network error. Please try again.");
+    if (err && err.name === "AbortError") {
+      window.dispatchEvent(new CustomEvent("qai:streamAborted"));
+    } else {
+      addMessageToCurrent("bot", "Network error. Please try again.");
+    }
   } finally {
+    activeAbortController = null;
+    setTyping(false);
     sendButton.disabled = false;
     messageInput.focus();
   }

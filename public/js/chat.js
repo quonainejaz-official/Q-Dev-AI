@@ -9,13 +9,155 @@ import { renderHistoryList, closeSidebarOnMobile } from "./sidebar.js";
 let messagesContainer, chatForm, messageInput, sendButton, typingIndicator;
 let welcomeScreen, chatArea, currentChatTitle;
 let editChatTitleBtn;
+let thinkingStatusTextEl, thinkingElapsedEl, stopButton, scrollToBottomBtn;
+let thinkingStartTime = null;
+let thinkingInterval = null;
+let clientPhaseTimers = [];
+let currentThinkingDuration = null;
 
-export const setTyping = (active) => {
-  if (typingIndicator) {
-    typingIndicator.classList.toggle("hidden", !active);
-    if (active && messagesContainer) {
+export const detectQueryIntent = (text) => {
+  if (!text || typeof text !== "string") {
+    return { text: "Thinking...", phase: "thinking" };
+  }
+  const lower = text.toLowerCase();
+  if (/(?:fix|error|bug|exception|traceback|syntax|debug|undefined|null|cannot read|fail|crash)/i.test(lower)) {
+    return { text: "Analyzing code & debugging...", phase: "analyzing" };
+  }
+  if (/(?:function|component|class|api|endpoint|sql|database|query|react|node|python|docker|css|html|regex|algorithm)/i.test(lower)) {
+    return { text: "Analyzing code structure...", phase: "analyzing" };
+  }
+  if (/(?:search|find|lookup|who|when|where|what is|how to|latest|news|history|tell me about)/i.test(lower)) {
+    return { text: "Searching knowledge base...", phase: "searching" };
+  }
+  if (/(?:solve|math|calculate|derive|formula|complexity|proof|theorem|logic)/i.test(lower)) {
+    return { text: "Formulating logical steps...", phase: "deep-thinking" };
+  }
+  if (/(?:write|draft|generate|create|compose|story|email|essay|blog|poem)/i.test(lower)) {
+    return { text: "Crafting response...", phase: "generating" };
+  }
+  if (/(?:compare|vs|difference|pros and cons|analyze|evaluate|review)/i.test(lower)) {
+    return { text: "Evaluating & analyzing...", phase: "analyzing" };
+  }
+  return { text: "Thinking...", phase: "thinking" };
+};
+
+export const updateThinkingStatus = (text, phase) => {
+  if (!typingIndicator) typingIndicator = $id("typingIndicator");
+  if (phase && typingIndicator) {
+    typingIndicator.dataset.phase = phase;
+  }
+  if (!thinkingStatusTextEl) thinkingStatusTextEl = $id("thinkingStatusText");
+  if (thinkingStatusTextEl && text) {
+    thinkingStatusTextEl.style.opacity = "0";
+    setTimeout(() => {
+      if (thinkingStatusTextEl) {
+        thinkingStatusTextEl.textContent = text;
+        thinkingStatusTextEl.style.opacity = "1";
+      }
+    }, 120);
+  }
+};
+
+export const setTyping = (active, queryText = "") => {
+  if (!typingIndicator) typingIndicator = $id("typingIndicator");
+  if (!stopButton) stopButton = $id("stopButton");
+  if (!thinkingStatusTextEl) thinkingStatusTextEl = $id("thinkingStatusText");
+  if (!thinkingElapsedEl) thinkingElapsedEl = $id("thinkingElapsed");
+
+  if (thinkingInterval) {
+    clearInterval(thinkingInterval);
+    thinkingInterval = null;
+  }
+  clientPhaseTimers.forEach(clearTimeout);
+  clientPhaseTimers = [];
+
+  if (active) {
+    const intent = detectQueryIntent(queryText);
+    if (typingIndicator) {
+      typingIndicator.classList.remove("hidden");
+      typingIndicator.dataset.phase = intent.phase;
+    }
+
+    if (thinkingStatusTextEl) {
+      thinkingStatusTextEl.textContent = intent.text;
+      thinkingStatusTextEl.style.opacity = "1";
+    }
+
+    thinkingStartTime = Date.now();
+    currentThinkingDuration = null;
+    if (thinkingElapsedEl) {
+      thinkingElapsedEl.textContent = "0.0s";
+      thinkingInterval = setInterval(() => {
+        if (!thinkingStartTime || !thinkingElapsedEl) return;
+        const elapsedSec = ((Date.now() - thinkingStartTime) / 1000).toFixed(1);
+        thinkingElapsedEl.textContent = `${elapsedSec}s`;
+      }, 100);
+    }
+
+    // Dynamic progression phases (Claude/Codex style)
+    const phases = [
+      { delay: 1400, text: "Analyzing context & semantics...", phase: "analyzing" },
+      { delay: 3400, text: "Searching relevant patterns...", phase: "searching" },
+      { delay: 6000, text: "Structuring solution...", phase: "generating" },
+      { delay: 9500, text: "Deep thinking & refining...", phase: "deep-thinking" },
+      { delay: 14000, text: "Synthesizing comprehensive response...", phase: "processing" }
+    ];
+    phases.forEach((p) => {
+      const t = setTimeout(() => {
+        if (typingIndicator && !typingIndicator.classList.contains("hidden")) {
+          updateThinkingStatus(p.text, p.phase);
+        }
+      }, p.delay);
+      clientPhaseTimers.push(t);
+    });
+
+    if (stopButton) {
+      stopButton.classList.remove("hidden");
+      stopButton.classList.add("visible");
+    }
+
+    if (messagesContainer) {
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
+  } else {
+    if (thinkingStartTime) {
+      currentThinkingDuration = ((Date.now() - thinkingStartTime) / 1000).toFixed(1);
+    }
+    if (typingIndicator) {
+      typingIndicator.classList.add("hidden");
+    }
+    if (thinkingInterval) {
+      clearInterval(thinkingInterval);
+      thinkingInterval = null;
+    }
+    clientPhaseTimers.forEach(clearTimeout);
+    clientPhaseTimers = [];
+    if (stopButton) {
+      stopButton.classList.add("hidden");
+      stopButton.classList.remove("visible");
+    }
+  }
+};
+
+export const renderTokenInfo = (bubble, usage, provider) => {
+  if (!bubble) return;
+  let meta = bubble.querySelector(".message-token-info");
+  if (!meta) {
+    meta = document.createElement("div");
+    meta.className = "message-token-info";
+    bubble.appendChild(meta);
+  }
+  const parts = [];
+  if (provider) {
+    parts.push(`<span>${escapeHtml(provider)}</span>`);
+  }
+  if (usage?.tokensOut) {
+    parts.push(`<span>${usage.tokensOut} tokens</span>`);
+  } else if (usage?.totalTokens) {
+    parts.push(`<span>${usage.totalTokens} tokens</span>`);
+  }
+  if (parts.length > 0) {
+    meta.innerHTML = parts.join('<span class="token-dot"></span>');
   }
 };
 
@@ -210,8 +352,25 @@ export const appendMessageToUI = (message) => {
     }
   }
 
+  if (message.role === "bot" && message.thoughtDuration && Number(message.thoughtDuration) >= 0.3) {
+    const thoughtHeader = document.createElement("div");
+    thoughtHeader.className = "thought-badge";
+    thoughtHeader.innerHTML = `
+      <svg class="thought-badge-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <polyline points="12 6 12 12 16 14"></polyline>
+      </svg>
+      <span>Thought for ${escapeHtml(String(message.thoughtDuration))}s</span>
+    `;
+    bubble.appendChild(thoughtHeader);
+  }
+
   const content = buildMessageContent(message.content);
   bubble.appendChild(content);
+
+  if (message.role === "bot" && (message.usage || message.provider)) {
+    renderTokenInfo(bubble, message.usage, message.provider);
+  }
 
   if (message.generatedImage) {
     const imgContainer = document.createElement("div");
@@ -303,7 +462,10 @@ export const addMessageToCurrent = (role, content, media) => {
     if (currentChatTitle) currentChatTitle.textContent = cur.title;
   }
   appendMessageToUI(message);
-  if (messagesContainer) messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  if (messagesContainer) {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    if (scrollToBottomBtn) scrollToBottomBtn.classList.add("hidden");
+  }
   syncCurrentChatToHistoryIfExists();
   persistState();
 };
@@ -320,6 +482,113 @@ export const startStreamEvent = (reader, decoder) => {
   let buffer = "";
   let streamingMsg = null;
   let sseType = null;
+  let isStreamActive = true;
+
+  const handleSSEMessage = (msg) => {
+    if (!msg || !isStreamActive) return null;
+
+    if (msg.type === "status") {
+      updateThinkingStatus(msg.text, msg.phase);
+    } else if (msg.type === "typing") {
+      setTyping(msg.active);
+    } else if (msg.type === "start") {
+      setTyping(false);
+      const thoughtTime = currentThinkingDuration || (thinkingStartTime ? ((Date.now() - thinkingStartTime) / 1000).toFixed(1) : null);
+      streamingMsg = {
+        role: "bot",
+        content: "",
+        thoughtDuration: thoughtTime && Number(thoughtTime) >= 0.3 ? thoughtTime : null,
+        provider: msg.provider || null,
+        timestamp: Date.now()
+      };
+      getCurrentChat().messages.push(streamingMsg);
+      appendMessageToUI(streamingMsg);
+    } else if (msg.type === "chunk" && streamingMsg) {
+      const stick = isNearBottom();
+      streamingMsg.content += decodeHtml(msg.text);
+      const lastBubble = messagesContainer?.lastElementChild;
+      if (lastBubble) {
+        const wrapper = lastBubble.querySelector(".message-content");
+        if (wrapper) {
+          const rebuilt = buildMessageContent(streamingMsg.content);
+          const cursor = document.createElement("span");
+          cursor.className = "streaming-cursor";
+          rebuilt.appendChild(cursor);
+          wrapper.innerHTML = "";
+          while (rebuilt.firstChild) wrapper.appendChild(rebuilt.firstChild);
+        }
+        if (stick) messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+    } else if (msg.type === "done") {
+      if (streamingMsg) {
+        const lastBubble = messagesContainer?.lastElementChild;
+        if (lastBubble) {
+          const wrapper = lastBubble.querySelector(".message-content");
+          if (wrapper) {
+            const rebuilt = buildMessageContent(streamingMsg.content);
+            wrapper.innerHTML = "";
+            while (rebuilt.firstChild) wrapper.appendChild(rebuilt.firstChild);
+          }
+          const cursor = lastBubble.querySelector(".streaming-cursor");
+          if (cursor) cursor.remove();
+
+          if (msg.usage || streamingMsg.provider) {
+            renderTokenInfo(lastBubble, msg.usage, streamingMsg.provider);
+          }
+        }
+        const cur = getCurrentChat();
+        if (!cur.titleIsCustom) {
+          cur.title = getTitleFromMessages(cur.messages);
+          if (currentChatTitle) currentChatTitle.textContent = cur.title;
+        }
+        syncCurrentChatToHistoryIfExists();
+        persistState();
+        streamingMsg = null;
+      }
+      return "done";
+    } else if (msg.type === "error") {
+      if (streamingMsg) {
+        const cur = getCurrentChat();
+        const idx = cur.messages.indexOf(streamingMsg);
+        if (idx !== -1) cur.messages.splice(idx, 1);
+        if (messagesContainer?.lastElementChild?.classList.contains("message")) {
+          messagesContainer.lastElementChild.remove();
+        }
+        streamingMsg = null;
+      }
+      addMessageToCurrent("bot", msg.message || "Something went wrong.");
+      return "error";
+    }
+    return null;
+  };
+
+  const abortHandler = () => {
+    isStreamActive = false;
+    setTyping(false);
+    if (streamingMsg) {
+      const lastBubble = messagesContainer?.lastElementChild;
+      if (lastBubble) {
+        const cursor = lastBubble.querySelector(".streaming-cursor");
+        if (cursor) cursor.remove();
+        const wrapper = lastBubble.querySelector(".message-content");
+        if (wrapper) {
+          const rebuilt = buildMessageContent(streamingMsg.content);
+          wrapper.innerHTML = "";
+          while (rebuilt.firstChild) wrapper.appendChild(rebuilt.firstChild);
+        }
+      }
+      const cur = getCurrentChat();
+      if (!cur.titleIsCustom) {
+        cur.title = getTitleFromMessages(cur.messages);
+        if (currentChatTitle) currentChatTitle.textContent = cur.title;
+      }
+      syncCurrentChatToHistoryIfExists();
+      persistState();
+      streamingMsg = null;
+    }
+  };
+  window.addEventListener("qai:streamAborted", abortHandler, { once: true });
+
   return {
     readNext: async () => {
       while (true) {
@@ -327,7 +596,6 @@ export const startStreamEvent = (reader, decoder) => {
         buffer = lines.pop() || "";
         for (const line of lines) {
           if (!line.trim()) continue;
-          // SSE format: "event: <type>" or "data: <json>"
           if (line.startsWith("event: ")) {
             sseType = line.slice(7).trim();
             continue;
@@ -338,120 +606,23 @@ export const startStreamEvent = (reader, decoder) => {
             try { msg = JSON.parse(rawData); } catch { sseType = null; continue; }
             msg.type = msg.type || sseType;
             sseType = null;
-            if (msg.type === "typing") {
-              setTyping(msg.active);
-            } else if (msg.type === "start") {
-              streamingMsg = { role: "bot", content: "", timestamp: Date.now() };
-              getCurrentChat().messages.push(streamingMsg);
-              appendMessageToUI(streamingMsg);
-            } else if (msg.type === "chunk" && streamingMsg) {
-              const stick = isNearBottom();
-              streamingMsg.content += decodeHtml(msg.text);
-              const lastBubble = messagesContainer?.lastElementChild;
-              if (lastBubble) {
-                const wrapper = lastBubble.querySelector(".message-content");
-                if (wrapper) {
-                  const rebuilt = buildMessageContent(streamingMsg.content);
-                  wrapper.innerHTML = "";
-                  while (rebuilt.firstChild) wrapper.appendChild(rebuilt.firstChild);
-                }
-                if (stick) messagesContainer.scrollTop = messagesContainer.scrollHeight;
-              }
-            } else if (msg.type === "done") {
-              if (streamingMsg) {
-                const lastBubble = messagesContainer?.lastElementChild;
-                if (lastBubble) {
-                  const wrapper = lastBubble.querySelector(".message-content");
-                  if (wrapper) {
-                    const rebuilt = buildMessageContent(streamingMsg.content);
-                    wrapper.innerHTML = "";
-                    while (rebuilt.firstChild) wrapper.appendChild(rebuilt.firstChild);
-                  }
-                }
-                const cur = getCurrentChat();
-                if (!cur.titleIsCustom) {
-                  cur.title = getTitleFromMessages(cur.messages);
-                  if (currentChatTitle) currentChatTitle.textContent = cur.title;
-                }
-                syncCurrentChatToHistoryIfExists();
-                persistState();
-                streamingMsg = null;
-              }
-              return "done";
-            } else if (msg.type === "error") {
-              if (streamingMsg) {
-                const cur = getCurrentChat();
-                const idx = cur.messages.indexOf(streamingMsg);
-                if (idx !== -1) cur.messages.splice(idx, 1);
-                if (messagesContainer?.lastElementChild?.classList.contains("message")) {
-                  messagesContainer.lastElementChild.remove();
-                }
-                streamingMsg = null;
-              }
-              addMessageToCurrent("bot", msg.message || "Something went wrong.");
-              return "error";
-            }
+            const res = handleSSEMessage(msg);
+            if (res) return res;
             continue;
           }
-          // NDJSON fallback: try parsing raw JSON line
           let msg;
           try { msg = JSON.parse(line); } catch { continue; }
-          if (msg.type === "typing") {
-            setTyping(msg.active);
-          } else if (msg.type === "start") {
-            streamingMsg = { role: "bot", content: "", timestamp: Date.now() };
-            getCurrentChat().messages.push(streamingMsg);
-            appendMessageToUI(streamingMsg);
-          } else if (msg.type === "chunk" && streamingMsg) {
-            const stick = isNearBottom();
-            streamingMsg.content += decodeHtml(msg.text);
-            const lastBubble = messagesContainer?.lastElementChild;
-            if (lastBubble) {
-              const wrapper = lastBubble.querySelector(".message-content");
-              if (wrapper) {
-                const rebuilt = buildMessageContent(streamingMsg.content);
-                wrapper.innerHTML = "";
-                while (rebuilt.firstChild) wrapper.appendChild(rebuilt.firstChild);
-              }
-              if (stick) messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
-          } else if (msg.type === "done") {
-            if (streamingMsg) {
-              const lastBubble = messagesContainer?.lastElementChild;
-              if (lastBubble) {
-                const wrapper = lastBubble.querySelector(".message-content");
-                if (wrapper) {
-                  const rebuilt = buildMessageContent(streamingMsg.content);
-                  wrapper.innerHTML = "";
-                  while (rebuilt.firstChild) wrapper.appendChild(rebuilt.firstChild);
-                }
-              }
-              const cur = getCurrentChat();
-              if (!cur.titleIsCustom) {
-                cur.title = getTitleFromMessages(cur.messages);
-                if (currentChatTitle) currentChatTitle.textContent = cur.title;
-              }
-              syncCurrentChatToHistoryIfExists();
-              persistState();
-              streamingMsg = null;
-            }
-            return "done";
-          } else if (msg.type === "error") {
-            if (streamingMsg) {
-              const cur = getCurrentChat();
-              const idx = cur.messages.indexOf(streamingMsg);
-              if (idx !== -1) cur.messages.splice(idx, 1);
-              if (messagesContainer?.lastElementChild?.classList.contains("message")) {
-                messagesContainer.lastElementChild.remove();
-              }
-              streamingMsg = null;
-            }
-            addMessageToCurrent("bot", msg.message || "Something went wrong.");
-            return "error";
-          }
+          const res = handleSSEMessage(msg);
+          if (res) return res;
         }
+
         let readResult;
-        try { readResult = await reader.read(); } catch {
+        try { readResult = await reader.read(); } catch (err) {
+          window.removeEventListener("qai:streamAborted", abortHandler);
+          if (err && err.name === "AbortError") {
+            abortHandler();
+            return "done";
+          }
           if (streamingMsg?.content.trim()) {
             const cur = getCurrentChat();
             if (!cur.titleIsCustom) {
@@ -463,9 +634,12 @@ export const startStreamEvent = (reader, decoder) => {
             streamingMsg = null;
             return "done";
           }
-          throw readResult;
+          throw err;
         }
-        if (readResult.done) return "done";
+        if (readResult.done) {
+          window.removeEventListener("qai:streamAborted", abortHandler);
+          return "done";
+        }
         buffer += decoder.decode(readResult.value, { stream: true });
       }
     }
@@ -533,6 +707,31 @@ export const initChat = () => {
   chatArea = $id("chatArea");
   currentChatTitle = $id("currentChatTitle");
   editChatTitleBtn = $id("editChatTitleBtn");
+  stopButton = $id("stopButton");
+  thinkingStatusTextEl = $id("thinkingStatusText");
+  thinkingElapsedEl = $id("thinkingElapsed");
+  scrollToBottomBtn = $id("scrollToBottomBtn");
+
+  if (scrollToBottomBtn && messagesContainer) {
+    messagesContainer.addEventListener("scroll", () => {
+      const nearBottom = isNearBottom();
+      scrollToBottomBtn.classList.toggle("hidden", nearBottom);
+    });
+
+    scrollToBottomBtn.addEventListener("click", () => {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: "smooth"
+      });
+      scrollToBottomBtn.classList.add("hidden");
+    });
+  }
+
+  if (stopButton) {
+    stopButton.addEventListener("click", () => {
+      window.dispatchEvent(new CustomEvent("qai:stopGeneration"));
+    });
+  }
 
   if (editChatTitleBtn) editChatTitleBtn.addEventListener("click", handleEditChatTitle);
 

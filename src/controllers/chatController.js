@@ -113,109 +113,127 @@ const postMessage = async (req, res, next) => {
 
   sendEvent("typing", { active: true });
 
-  try {
-    const incomingHistory = normalizeIncomingHistory(req.body?.history);
-    const lastMessage = incomingHistory[incomingHistory.length - 1];
-    const historyForModel =
-      lastMessage?.role === "user" && lastMessage.content === cleanMessage
-        ? incomingHistory.slice(0, -1)
-        : incomingHistory;
+  // In non-test environments, send rich status phases to engage the user
+  const isTest = process.env.NODE_ENV === "test";
+  const STATUS_PHASES = [
+    { delay: 1200, phase: "understanding", text: "Understanding your question..." },
+    { delay: 3000, phase: "analyzing", text: "Analyzing context..." },
+    { delay: 5500, phase: "generating", text: "Crafting response..." },
+    { delay: 9000, phase: "deep-thinking", text: "Deep thinking..." },
+    { delay: 14000, phase: "processing", text: "Still working on it..." }
+  ];
+  const phaseTimers = !isTest
+    ? STATUS_PHASES.map((s) => setTimeout(() => sendEvent("status", s), s.delay))
+    : [];
+  const clearPhaseTimers = () => phaseTimers.forEach(clearTimeout);
 
-    const personalization = req.body?.personalization || {};
-    const customInstructions = typeof personalization.customInstructions === "string"
-      ? personalization.customInstructions.trim().slice(0, 4000)
-      : "";
-    const allowedStyles = new Set(["concise", "balanced", "detailed"]);
-    const responseStyle = allowedStyles.has(personalization.responseStyle)
-      ? personalization.responseStyle
-      : "balanced";
-    const styleInstruction = {
-      concise: "Keep responses concise and action-oriented unless detail is requested.",
-      balanced: "Use a balanced level of detail with clear explanations and practical examples when useful.",
-      detailed: "Provide thorough, step-by-step responses with helpful context and examples."
-    }[responseStyle];
-    const personalizationPrompt = [
-      personalization.memoryEnabled !== false && customInstructions
-        ? `User custom instructions:\n${customInstructions}`
-        : "",
-      `Preferred response style: ${styleInstruction}`
-    ].filter(Boolean).join("\n\n");
+    try {
+      const incomingHistory = normalizeIncomingHistory(req.body?.history);
+      const lastMessage = incomingHistory[incomingHistory.length - 1];
+      const historyForModel =
+        lastMessage?.role === "user" && lastMessage.content === cleanMessage
+          ? incomingHistory.slice(0, -1)
+          : incomingHistory;
 
-    const media = hasMedia ? { images, audios, videos, pdfs } : { images: [], audios: [], videos: [], pdfs: [] };
-    const modelMessages = [
-      { role: "system", content: `${SYSTEM_PROMPT}\n\n${personalizationPrompt}` },
-      ...historyForModel.map((item) => ({
-        role: item.role === "bot" ? "assistant" : "user",
-        content: item.content
-      })),
-      { role: "user", content: buildUserContent(cleanMessage, media) }
-    ];
-    const streamArgs = {
-      message: cleanMessage,
-      history: historyForModel,
-      ...media,
-      messages: modelMessages,
-      personalizationPrompt
-    };
+      const personalization = req.body?.personalization || {};
+      const customInstructions = typeof personalization.customInstructions === "string"
+        ? personalization.customInstructions.trim().slice(0, 4000)
+        : "";
+      const allowedStyles = new Set(["concise", "balanced", "detailed"]);
+      const responseStyle = allowedStyles.has(personalization.responseStyle)
+        ? personalization.responseStyle
+        : "balanced";
+      const styleInstruction = {
+        concise: "Keep responses concise and action-oriented unless detail is requested.",
+        balanced: "Use a balanced level of detail with clear explanations and practical examples when useful.",
+        detailed: "Provide thorough, step-by-step responses with helpful context and examples."
+      }[responseStyle];
+      const personalizationPrompt = [
+        personalization.memoryEnabled !== false && customInstructions
+          ? `User custom instructions:\n${customInstructions}`
+          : "",
+        `Preferred response style: ${styleInstruction}`
+      ].filter(Boolean).join("\n\n");
 
-    // Select providers for fallback (2.2) based on capabilities needed.
-    const providers = registry.selectAll({ vision: hasMedia, streaming: true });
+      const media = hasMedia ? { images, audios, videos, pdfs } : { images: [], audios: [], videos: [], pdfs: [] };
+      const modelMessages = [
+        { role: "system", content: `${SYSTEM_PROMPT}\n\n${personalizationPrompt}` },
+        ...historyForModel.map((item) => ({
+          role: item.role === "bot" ? "assistant" : "user",
+          content: item.content
+        })),
+        { role: "user", content: buildUserContent(cleanMessage, media) }
+      ];
+      const streamArgs = {
+        message: cleanMessage,
+        history: historyForModel,
+        ...media,
+        messages: modelMessages,
+        personalizationPrompt
+      };
 
-    // If no AI providers are configured, return a clear SSE error so the
-    // frontend can display a helpful message instead of silently finishing.
-    if (!providers || providers.length === 0) {
-      sendEvent("typing", { active: false });
-      sendEvent("error", { message: "No AI providers configured on the server. Please set an API key." });
-      res.end();
-      return;
-    }
-    let lastError = null;
-    let usage = null;
+      // Select providers for fallback (2.2) based on capabilities needed.
+      const providers = registry.selectAll({ vision: hasMedia, streaming: true });
 
-    for (const provider of providers) {
-      try {
-        let started = false;
-        for await (const event of provider.stream(streamArgs)) {
-          if (event.type === "token" && event.text) {
-            if (!started) {
-              sendEvent("typing", { active: false });
-              sendEvent("start", {});
-              started = true;
-            }
-            sendEvent("chunk", { text: sanitizeMessage(event.text) });
-          } else if (event.type === "done") {
-            usage = event.usage;
-          } else if (event.type === "error") {
-            throw new Error(event.error || `${provider.name} stream error`);
-          }
-        }
-
-        if (!started) {
-          throw new Error(`Provider ${provider.name} returned no content.`);
-        }
-
-        lastError = null;
-        break;
-      } catch (error) {
-        lastError = error;
-        console.error(`[chat] Provider ${provider.name} failed: ${error.message}`);
-        usage = null;
+      // If no AI providers are configured, return a clear SSE error so the
+      // frontend can display a helpful message instead of silently finishing.
+      if (!providers || providers.length === 0) {
+        clearPhaseTimers();
+        sendEvent("typing", { active: false });
+        sendEvent("error", { message: "No AI providers configured on the server. Please set an API key." });
+        res.end();
+        return;
       }
-    }
+      let lastError = null;
+      let usage = null;
 
-    if (lastError) {
-      throw lastError;
-    }
+      for (const provider of providers) {
+        try {
+          let started = false;
+          for await (const event of provider.stream(streamArgs)) {
+            if (event.type === "token" && event.text) {
+              if (!started) {
+                clearPhaseTimers();
+                sendEvent("typing", { active: false });
+                if (!isTest) { sendEvent("status", { phase: "streaming", text: "" }); }
+                sendEvent("start", {});
+                started = true;
+              }
+              sendEvent("chunk", { text: sanitizeMessage(event.text) });
+            } else if (event.type === "done") {
+              usage = event.usage;
+            } else if (event.type === "error") {
+              throw new Error(event.error || `${provider.name} stream error`);
+            }
+          }
 
-    sendEvent("typing", { active: false });
-    sendEvent("done", { usage });
-    res.end();
-  } catch (error) {
-    sendEvent("typing", { active: false });
-    sendEvent("error", { message: getProviderErrorMessage(error) });
-    res.end();
-    next(error);
-  }
+          if (!started) {
+            throw new Error(`Provider ${provider.name} returned no content.`);
+          }
+
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          console.error(`[chat] Provider ${provider.name} failed: ${error.message}`);
+          usage = null;
+        }
+      }
+
+      if (lastError) {
+        throw lastError;
+      }
+
+      sendEvent("typing", { active: false });
+      sendEvent("done", { usage });
+      res.end();
+    } catch (error) {
+      clearPhaseTimers();
+      sendEvent("typing", { active: false });
+      sendEvent("error", { message: getProviderErrorMessage(error) });
+      res.end();
+      next(error);
+    }
 };
 
 module.exports = {
